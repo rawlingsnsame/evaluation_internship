@@ -234,12 +234,12 @@ evaluator = InternshipEvaluator(EvaluatorConfig(max_retries=3, retry_delay=5, ti
 ## Project Structure
 
 ```
+src/                          
+│  ├─ assembler.py
+│  ├─ criterions.py
+│  ├─ validators.py
+│  ├─ prompt_builder.py
 ├─ main.py                    # entrypoint
-├─ assembler.py
-├─ criterions.py
-├─ validators.py
-├─ prompt_builder.py
-├── criterions.py      # School criteria definitions (COLTECH & NAHPI)
 ├── .env               # API credentials (never commit this)
 └── README.md
 ```

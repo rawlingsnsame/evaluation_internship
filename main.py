@@ -1,131 +1,125 @@
-import os
-import json
 import logging
-import time
-from dataclasses import dataclass, field
-from typing import Dict, List
+from typing import Dict, Any
 
-from openai import OpenAI, APIConnectionError, APIStatusError, APITimeoutError
-from dotenv import load_dotenv
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field, field_validator, model_validator
 
-from src.validators import ValidationError, AIResponseError, InputValidator, ResponseValidator
-from src.prompt_builder import PromptBuilder
-from src.assembler import ReportAssembler
-
-load_dotenv()
-
-logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+from src.criterions import SCHOOL_CRITERIONS
+from src.validators import ValidationError
+from how_to import _HOW_TO
+from app import AIResponseError, InternshipEvaluator
+ 
 log = logging.getLogger(__name__)
 
-@dataclass
-class EvaluatorConfig:
-    models: List[str] = field(default_factory=lambda: [
-        "google/gemini-2.5-flash-lite",   # Primary
-        "meta-llama/llama-4-scout",  # Free fallback
-        "mistralai/mistral-nemo",
-    ])
-    max_retries: int = 2
-    retry_delay: int = 2
-    timeout: int = 60
+app = FastAPI(
+    title="Internship Evaluation API",
+    description="AI-powered internship performance evaluation for COLTECH and NAHPI.",
+    version="1.0.0",
+)
+ 
 
-class AIClient:
-    """Handles API calls with retries per model"""
+"""Tighten this before production""" 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],    
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-    def __init__(self, config: EvaluatorConfig):
-        self.config = config
-        self.client = OpenAI(
-            base_url=os.getenv("OPENROUTER_BASE_URL"),
-            api_key=os.getenv("OPENROUTER_API_KEY"),
-        )
+reports: Dict[str, Any] = {}
 
-    def call(self, prompt: str) -> Dict:
-        errors = {}
-        for model in self.config.models:
-            try:
-                return self._try_model(model, prompt)
-            except Exception as e:
-                errors[model] = f"{type(e).__name__}: {e}"
-                log.warning("Model %s failed — trying next. (%s)", model, errors[model])
+class PersonalInfo(BaseModel):
+    id:   str = Field(..., min_length=1)
+    name: str = Field(..., min_length=5)
+    school: str = Field(..., pattern="^(COLTECH|NAHPI)$")
 
-        summary = "\n".join(f"  {m}: {err}" for m, err in errors.items())
-        raise AIResponseError(f"All models failed:\n{summary}")
+class Performance(BaseModel):
+    tasks_done:   int   = Field(..., ge=0)
+    tasks_total:  int   = Field(..., gt=0)
+    days_present: int   = Field(..., ge=0)
+    total_days:   int   = Field(..., gt=0)
+    average_mark: float = Field(..., ge=0, le=100)
+ 
+    @model_validator(mode="after")
+    def check_ratios(self) -> "Performance":
+        if self.tasks_done > self.tasks_total:
+            raise ValueError(
+                f"tasks_done ({self.tasks_done}) cannot exceed tasks_total ({self.tasks_total})"
+            )
+        if self.days_present > self.total_days:
+            raise ValueError(
+                f"days_present ({self.days_present}) cannot exceed total_days ({self.total_days})"
+            )
+        return self
+    
+class ColtechComments(BaseModel):
+    participation:    str = Field(..., min_length=1)
+    discipline:       str = Field(..., min_length=1)
+    integration:      str = Field(..., min_length=1)
+    general_behavior: str = Field(..., min_length=1)
 
-    def _try_model(self, model: str, prompt: str) -> Dict:
-        last_exc = None
-        for attempt in range(1, self.config.max_retries + 1):
-            try:
-                log.info("Model: %s | Attempt %d/%d", model, attempt, self.config.max_retries)
-                response = self.client.chat.completions.create(
-                    model=model,
-                    messages=[{"role": "user", "content": prompt}],
-                    response_format={"type": "json_object"},
-                    timeout=self.config.timeout,
-                )
-                return json.loads(response.choices[0].message.content)
+    @field_validator("participation", "discipline", "integration", "general_behavior")
+    @classmethod
+    def no_blank_comments(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("Comment cannot be blank.")
+        return v.strip()
 
-            except APITimeoutError as e:
-                last_exc = e
-                log.warning("Timeout on attempt %d — %s", attempt, e)
+class ColtechRemarks(BaseModel):
+    supervisor_remark: str = Field(..., min_length=1)
+    comments: ColtechComments
 
-            except APIConnectionError as e:
-                last_exc = e
-                log.warning("Connection error on attempt %d — %s", attempt, e)
+class NahpiRemarks(BaseModel):
+    supervisor_remark: str = Field(..., min_length=1)
+ 
+class EvaluationRequest(BaseModel):
+    personal:    PersonalInfo
+    performance: Performance
+    remarks:     Dict[str, Any] 
 
-            except APIStatusError as e:
-                last_exc = e
-                if e.status_code == 429 or e.status_code >= 500:
-                    log.warning("Status %s on attempt %d — %s", e.status_code, attempt, e.message)
-                else:
-                    log.error("Non-retryable %s from %s: %s", e.status_code, model, e.message)
-                    raise
+evaluator = InternshipEvaluator()
 
-            except json.JSONDecodeError as e:
-                log.error("Invalid JSON from %s: %s", model, e)
-                raise
+@app.exception_handler(StarletteHTTPException)
+async def catch_all(request: Request, exc: StarletteHTTPException):
+    if request.url.path == "/evaluate":
+        raise exc   # let /evaluate's own errors pass through normally
+    return JSONResponse(status_code=exc.status_code, content=_HOW_TO)
 
-            if attempt < self.config.max_retries:
-                log.info("Retrying in %ds...", self.config.retry_delay)
-                time.sleep(self.config.retry_delay)
-
-        raise last_exc
-
-
-class InternshipEvaluator:
-    def __init__(self, config: EvaluatorConfig | None = None):
-        cfg = config or EvaluatorConfig()
-        self._validator  = InputValidator()
-        self._prompt     = PromptBuilder()
-        self._ai         = AIClient(cfg)
-        self._response   = ResponseValidator()
-        self._assembler  = ReportAssembler()
-
-    def generate_report(self, school: str, personal: dict,
-                        performance: dict, remarks: dict) -> Dict:
-        self._validator.validate(school, personal, performance, remarks)
-        prompt   = self._prompt.build(school, performance, remarks)
-        ai_data  = self._ai.call(prompt)
-        self._response.validate(school, ai_data)
-        return self._assembler.assemble(school, personal, performance, remarks, ai_data)
-
-
-if __name__ == "__main__":
-    evaluator = InternshipEvaluator() 
-    personal    = {"name": "Rawlings Ngenge", "id": "ST001"}
-    performance = {"tasks_done": 5, "tasks_total": 5, "days_present": 45, "total_days": 50, "average_mark": 78}
-    remarks     = {
-        "comments": {
-            "participation":    "Lacking in hardwork and proactiveness.",
-            "discipline":       "Generally punctual.",
-            "integration":      "Works independently but rarely shows initiative.",
-            "general_behavior": "Professional conduct maintained.",
-        },
-        "supervisor_remark": "Very competent and has potential to grow with more initiative and engagement.",
-    }
-
+@app.post("/evaluate", status_code=200)
+async def evaluate(request: EvaluationRequest):
+    """
+    Submit intern data for AI evaluation.
+    Returns the full scored report.
+    """
+    # Validate school-specific remarks shape
+    school = request.personal.school
     try:
-        report = evaluator.generate_report("COLTECH", personal, performance, remarks)
-        print(json.dumps(report, indent=2))
+        if school == "COLTECH":
+            validated_remarks = ColtechRemarks(**request.remarks)
+        elif school == "NAHPI":
+            validated_remarks = NahpiRemarks(**request.remarks)
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"Invalid remarks: {e}")
+ 
+    # Run evaluation
+    try:
+        report = evaluator.generate_report(
+            school=school,
+            personal=request.personal.model_dump(),
+            performance=request.performance.model_dump(),
+            remarks=validated_remarks.model_dump(),
+        )
+        
     except ValidationError as e:
-        log.error("Invalid input — %s", e)
+        raise HTTPException(status_code=422, detail=str(e))
     except AIResponseError as e:
-        log.error("Evaluation failed — %s", e)
+        raise HTTPException(status_code=502, detail=str(e))
+    except Exception as e:
+        log.exception("Unexpected error during evaluation")
+        raise HTTPException(status_code=500, detail="Internal server error.")
+ 
+    # Store and return
+    return {"report": report}
