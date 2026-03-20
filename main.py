@@ -8,7 +8,6 @@ from typing import Dict, List
 from openai import OpenAI, APIConnectionError, APIStatusError, APITimeoutError
 from dotenv import load_dotenv
 
-from criterions import SCHOOL_CRITERIONS
 from validators import ValidationError, AIResponseError, InputValidator, ResponseValidator
 from prompt_builder import PromptBuilder
 from assembler import ReportAssembler
