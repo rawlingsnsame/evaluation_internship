@@ -1,6 +1,6 @@
 from typing import Dict
 
-from criterions import SCHOOL_CRITERIONS
+from src.criterions import SCHOOL_CRITERIONS
 
 
 class ReportAssembler:

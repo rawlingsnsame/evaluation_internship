@@ -1,7 +1,7 @@
 import json
 import textwrap
 
-from criterions import SCHOOL_CRITERIONS
+from src.criterions import SCHOOL_CRITERIONS
 
 class PromptBuilder:
     """Builds school-specific evaluation prompts with few-shot examples."""

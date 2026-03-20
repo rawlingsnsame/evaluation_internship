@@ -9,7 +9,7 @@ from typing import Dict, List
 from openai import OpenAI, APIConnectionError, APIStatusError, APITimeoutError
 from dotenv import load_dotenv
 
-from criterions import SCHOOL_CRITERIONS
+from src.criterions import SCHOOL_CRITERIONS
 
 class ValidationError(Exception):
     """Input data failed validation before reaching the AI."""

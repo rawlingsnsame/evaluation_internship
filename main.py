@@ -8,9 +8,9 @@ from typing import Dict, List
 from openai import OpenAI, APIConnectionError, APIStatusError, APITimeoutError
 from dotenv import load_dotenv
 
-from validators import ValidationError, AIResponseError, InputValidator, ResponseValidator
-from prompt_builder import PromptBuilder
-from assembler import ReportAssembler
+from src.validators import ValidationError, AIResponseError, InputValidator, ResponseValidator
+from src.prompt_builder import PromptBuilder
+from src.assembler import ReportAssembler
 
 load_dotenv()
 
