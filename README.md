@@ -35,8 +35,8 @@ task_rate      = tasks_completed / total_tasks
 attendance_rate = days_present / total_days
 ```
 
-### Stage 2 — Remark Analysis (Google Gemini)
-The remark and numeric rates are sent to Gemini, which scores the intern on 7 behavioural dimensions (0.0 to 1.0 each):
+### Stage 2 — Remark Analysis (LLM)
+The remark and numeric rates are sent to LLM, which scores the intern on 7 behavioural dimensions (0.0 to 1.0 each):
 
 - **Work Quality** — thoroughness and accuracy of work produced
 - **Technical Skill** — competence with tools and technology
@@ -54,7 +54,7 @@ The remark is the primary signal. Numeric rates are supporting context only.
 Each rubric criterion is scored by blending the three signals using criterion-specific weights:
 
 ```
-score = (task_rate × w1) + (attendance_rate × w2) + (AI_dimension × w3)
+score = (task_rate × w1) + (attendance_rate × w2) + (AI_dimension_based_on_remark × w3)
 ```
 
 Weights reflect what each criterion actually measures. Communication is 100% AI-driven (tasks and attendance say nothing about it). Discipline draws heavily from attendance. Commitment uses all three signals equally.
@@ -74,13 +74,13 @@ A structured evaluation report formatted to the selected school's rubric, contai
 - Per-criterion observations (COLTECH only)
 - AI dimension scores for transparency
 - Supervisor's original remark
-## 5. Why Gemini — Comparison
+## 5. Why AI — Comparison
 
 ### Remark Analysis
 
 | Approach | Why considered | Decision |
 |---|---|---|
-| **Google Gemini API** | Understands nuance and context. Returns per-dimension scores, not just a single sentiment label. Can separate "hardworking but lacks independence" into high work_quality and low independence simultaneously. | ✅ Chosen |
+| **AI API** | Understands nuance and context. Returns per-dimension scores, not just a single sentiment label. Can separate "hardworking but lacks independence" into high work_quality and low independence simultaneously. | ✅ Chosen |
 | VADER (rule-based) | Fast, no internet needed. Returns only one compound score (−1 to +1). Cannot split a remark into separate dimension scores. | ❌ Not used |
 | RoBERTa / DistilBERT (local) | More accurate than VADER, runs offline. Still limited to POSITIVE / NEGATIVE with a confidence score — no per-dimension breakdown. | ⚠️ Offline fallback |
 | Manual scoring by supervisor | Accurate but shifts the entire burden back to the supervisor, which the system is designed to reduce. | ❌ Not used |
